@@ -335,7 +335,7 @@ function App() {
   return (
     <div className="App">
       <ToastContainer position="top-center" autoClose={5000}/>
-      <WRHeader title="Escrow" image={true} />
+      <WRHeader title="Multisign Wallet" image={true} />
       <WRInfo chain="Goerli testnet" />
       <WRContent>
  
