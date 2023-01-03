@@ -9,11 +9,12 @@
     "bootstrap": "^5.2.3",
     "ethers": "^5.7.2",
     "react": "^18.2.0",
+    "react-bootstrap": "^2.7.0",
     "react-dom": "^18.2.0",
     "react-scripts": "5.0.1",
     "react-toastify": "^9.1.1",
     "web-vitals": "^2.1.4",
-    "wrcomponents": "^1.0.46"
+    "wrcomponents": "^1.0.82"
   },
   "scripts": {
     "start": "react-scripts start",

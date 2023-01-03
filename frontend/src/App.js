@@ -1,17 +1,29 @@
 import "bootstrap/dist/css/bootstrap.min.css";
-import { useEffect, useState } from 'react';
+import "react-toastify/dist/ReactToastify.css";
+import './App.css';
+
+import {  useState, useEffect } from 'react';
+import { ethers } from "ethers";
+import {ToastContainer, toast} from "react-toastify";
+
 import WRHeader from 'wrcomponents/dist/WRHeader';
-import WRFooter from 'wrcomponents/dist/WRFooter';
+import WRFooter, { async } from 'wrcomponents/dist/WRFooter';
 import WRInfo from 'wrcomponents/dist/WRInfo';
 import WRContent from 'wrcomponents/dist/WRContent';
 import WRTools from 'wrcomponents/dist/WRTools';
-import { ethers } from "ethers";
-import './App.css';
-import {ToastContainer, toast} from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
-import { _toEscapedUtf8String } from "ethers/lib/utils";
+import Button from "react-bootstrap/Button";
+
+import { format6FirstsAnd6LastsChar, formatDate } from "./utils";
+import meta from "./assets/metamask.png";
+
 
 function App() {
+
+  const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState({});
+  const [provider, setProvider] = useState();
+  const [contract, setContract] = useState();
+  const [signer, setSigner] = useState();
 
   const [approvers, setApprovers] = useState([]);
   const [balance, setBalance] = useState(0);
@@ -24,7 +36,9 @@ function App() {
 
   const [valueDeposit, setValueDeposit]= useState('');
 
-  const addressContract = '0xbd52560E5DF8f76B8983132390ab49A42e5e4eD4';
+  const [userAccount, setUserAccount]= useState('');
+
+  const contractAddress = '0x823a601543b254be7197b05c48648F103cC8d3d1';
 
   const abi = [
     {
@@ -267,23 +281,90 @@ function App() {
     }
   ];
   
-  let contractDeployed = null;
-  let contractDeployedSigner = null;
-  
-  useEffect(() => {
+  async function handleConnectWallet (){
+    try {
+      setLoading(true)
+      let userAcc = await provider.send('eth_requestAccounts', []);
+      setUser({account: userAcc[0], connected: true});
 
-    getData()
+      const contrSig = new ethers.Contract(contractAddress, abi, provider.getSigner())
+      setSigner( contrSig)
+
+    } catch (error) {
+      if (error.message == 'provider is undefined'){
+        toastMessage('No provider detected.')
+      }
+    } finally{
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    
+    async function getData() {
+      try {
+        const {ethereum} = window;
+        if (!ethereum){
+          toastMessage('Metamask not detected');
+          return
+        }
+  
+        const prov =  new ethers.providers.Web3Provider(window.ethereum);
+        setProvider(prov);
+
+        const contr = new ethers.Contract(contractAddress, abi, prov);
+        setContract(contr);
+        
+        if (! await isGoerliTestnet()){
+          toastMessage('Change to goerli testnet.')
+          return;
+        }
+
+        //contract data
+        let approv = await contr.getApprovers();
+        setApprovers(  approv);
+        setBalance( await contr.balanceOf());
+        setQuorum( await contr.quorum());
+        setNextId( await contr.nextId());
+        let transfers =  await contr.getTransfers()
+        setTransfers( transfers);
+        
+      } catch (error) {
+        toastMessage(error.reason)        
+      }
+      
+    }
+
+    getData()  
     
   }, [])
   
-
-  function getProvider(){
-    const provider = new ethers.providers.Web3Provider(window.ethereum);
-    if (contractDeployed == null){
-      contractDeployed = new ethers.Contract(addressContract, abi, provider)
+  function isConnected(){
+    if (!user.connected){
+      toastMessage('You are not connected!')
+      return false;
     }
-    if (contractDeployedSigner == null){
-      contractDeployedSigner = new ethers.Contract(addressContract, abi, provider.getSigner());
+    
+    return true;
+  }
+
+  async function isGoerliTestnet(){
+    const goerliChainId = "0x5";
+    const respChain = await getChain();
+    return goerliChainId == respChain;
+  }
+
+  async function getChain() {
+    const currentChainId = await  window.ethereum.request({method: 'eth_chainId'})
+    return currentChainId;
+  }
+
+  async function handleDisconnect(){
+    try {
+      setUser({});
+      setSigner(null);
+    } catch (error) {
+      toastMessage(error.reason)
     }
   }
 
@@ -291,84 +372,122 @@ function App() {
     toast.info(text)  ;
   }
 
-  async function getData() {
-    getProvider();
-    let approv = await contractDeployed.getApprovers();
-    setApprovers(  approv);
-    setBalance( await contractDeployed.balanceOf());
-    setQuorum( await contractDeployed.quorum());
-    setNextId( await contractDeployed.nextId());
-    let transfers =  await contractDeployed.getTransfers()
-    setTransfers( transfers);
-  }
  
   async function handleCreateTransfer(){
-    getProvider();
+    
     try {
-      const resp  = await contractDeployedSigner.createTransfer(valueTransfer, addressTo);  
-      toastMessage("Transfer created, wait some seconds to refresh page.")
+      if (!isConnected()) {
+        return;
+      }
+      if (! await isGoerliTestnet()){
+        toastMessage('Change to goerli testnet.')
+        return;
+      }
+      setLoading(true);
+      const resp  = await signer.createTransfer(valueTransfer, addressTo);  
+      await resp.wait();
+      toastMessage("Transfer created, refresh page.")
     } catch (error) {
-      toastMessage(error.data.message);
+      toastMessage(error.reason)      
+    } finally{
+      setLoading(false);
     }
+    
+    
   }
 
   async function handleDeposit(){
-    getProvider();
     try {
-      const resp  = await contractDeployedSigner.deposit({value: valueDeposit});  
+      if (!isConnected()) {
+        return;
+      }
+      if (! await isGoerliTestnet()){
+        toastMessage('Change to goerli testnet.')
+        return;
+      }
+      setLoading(true);
+      const resp  = await signer.deposit({value: valueDeposit});  
+      await resp.wait();
       toastMessage("Value deposited.")
     } catch (error) {
-      toastMessage(error.data.message);
+      toastMessage(error.reason)      
+    } finally{
+      setLoading(false);
     }
   }
 
   async function handleTransfer(transferId){
-    getProvider();
+    
     try {
-      const resp  = await contractDeployedSigner.sendTransfer(transferId);  
+      if (!isConnected()) {
+        return;
+      }
+      if (! await isGoerliTestnet()){
+        toastMessage('Change to goerli testnet.')
+        return;
+      }
+      setLoading(true);
+      const resp  = await signer.sendTransfer(transferId);  
+      await resp.wait();
       toastMessage("Success.")
     } catch (error) {
-      toastMessage(error.data.message);
+      toastMessage(error.reason)      
+    } finally{
+      setLoading(false);
     }
+
   }
 
   return (
     <div className="App">
       <ToastContainer position="top-center" autoClose={5000}/>
       <WRHeader title="Multisign Wallet" image={true} />
-      <WRInfo chain="Goerli testnet" />
+      <WRInfo chain="Goerli" testnet="true" />
       <WRContent>
  
-        {quorum == '' ?
-          <>
-            <button onClick={getData}>Load data from blockchain</button>
+        <h1>MULTISIGN WALLET</h1>
+
+        {loading && 
+          <h1>Loading....</h1>
+        }
+        { !user.connected ?<>
+            <Button className="commands" variant="btn btn-primary" onClick={handleConnectWallet}>
+              <img src={meta} alt="metamask" width="30px" height="30px"/>Connect to Metamask
+            </Button></>
+          : <>
+            <label>Welcome {format6FirstsAnd6LastsChar(user.account)}</label>
+            <button className="btn btn-primary commands" onClick={handleDisconnect}>Disconnect</button>
           </>
-          : 
+        }
+        <hr/> 
+
+        {quorum !== '' &&
+          
           <>
           <h2>MultisigWallet Info</h2>
-          <h5>Balance: {(balance).toString()} wei</h5>
-          <h5>Quorum minimum: {(quorum).toString()}</h5>
-          <h5>Transfers registered: {(nextId).toString()}</h5>
-          <h5>Approvers</h5>
+          <label>Balance: {(balance).toString()} wei</label>
+          <label>Quorum minimum: {(quorum).toString()}</label>
+          <label>Transfers registered: {(nextId).toString()}</label>
+          <label>Approvers</label>
           {
             approvers.map((item, ind) =>  
-              <p key={ind}>{item}</p>
+              <label key={ind}>{item}</label>
             )
           }
           
           <hr/>
           <h2>Deposit funds</h2>
-          <input type="text" placeholder="Value to deposit" onChange={(e) => setValueDeposit(e.target.value)} value={valueDeposit}/>
-          <button onClick={handleDeposit} >Deposit funds</button>
+          <input type="number" className="mb-1 col-3" placeholder="Value to deposit" onChange={(e) => setValueDeposit(e.target.value)} value={valueDeposit}/>
+          <button className="btn btn-primary col-3" onClick={handleDeposit} >Deposit funds</button>
           <hr/>
           <h2>Create transfer</h2>
-          <input type="text" placeholder="Address to" onChange={(e) => setAddressTo(e.target.value)} value={addressTo}/>
-          <input type="text" placeholder="Value to transfer" onChange={(e) => setValueTransfer(e.target.value)} value={valueTransfer}/>
-          <button onClick={handleCreateTransfer} >Create transfer</button>
+          <input type="text" className="mb-1 col-3" placeholder="Address to" onChange={(e) => setAddressTo(e.target.value)} value={addressTo}/>
+          <input type="number" className="mb-1 col-3" placeholder="Value to transfer" onChange={(e) => setValueTransfer(e.target.value)} value={valueTransfer}/>
+          <button className="btn btn-primary col-3" onClick={handleCreateTransfer} >Create transfer</button>
           <hr/>
           <h2>Transfers</h2>
           { transfers.length > 0 ?
-            <table>
+            <table className="table">
               <thead>
                 <tr>
                   <td style={{width: 100}}>Id</td>
@@ -388,7 +507,7 @@ function App() {
                     <td>{(item.amount).toString()}</td>
                     <td>{(item.approvals).toString()}</td>
                     <td>{item.sent.toString()}</td>
-                    <td>{!item.sent ? (<button onClick={() => handleTransfer(ind)}>Approve/Send Transfer</button>) : <p>Transferred</p> }</td>
+                    <td>{!item.sent ? (<button className="btn btn-primary" onClick={() => handleTransfer(ind)}>Approve/Send Transfer</button>) : <p>Transferred</p> }</td>
                   </tr>
                 )}                
               </tbody>
